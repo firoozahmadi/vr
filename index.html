@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>دوچرخه‌سواری نئونی — Cardboard VR</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html,body{height:100%;margin:0;background:#0f172a;color:#f1f5f9;font-family:Vazirmatn,Tahoma,sans-serif;overflow:hidden}
+canvas#c{display:block;width:100%;height:100%}
+.p{position:fixed;background:rgba(10,4,32,.72);border:1px solid rgba(0,240,255,.45);box-shadow:0 0 14px rgba(0,240,255,.25);border-radius:12px;padding:8px 12px;font-size:13px;backdrop-filter:blur(6px)}
+#top{top:calc(8px + env(safe-area-inset-top,0px));right:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;max-width:calc(100% - 190px)}
+select,label.b{background:#1e293b;color:#f1f5f9;border:1px solid #475569;border-radius:8px;padding:4px 8px;font:inherit;cursor:pointer}
+#hud{bottom:calc(8px + env(safe-area-inset-bottom,0px));right:8px;line-height:1.7}
+#hud b{font-size:26px;color:#00f0ff;text-shadow:0 0 10px #00f0ff}
+#mm{top:calc(8px + env(safe-area-inset-top,0px));left:8px;width:150px;height:150px;padding:0;overflow:hidden}
+#help{bottom:calc(8px + env(safe-area-inset-bottom,0px));left:8px;max-width:230px;font-size:12px;opacity:.9}
+#tc{position:fixed;bottom:calc(90px + env(safe-area-inset-bottom,0px));left:8px;display:none;gap:6px}
+#tc button{width:54px;height:54px;border-radius:50%;border:0;background:rgba(30,41,59,.8);color:#fff;font-size:22px;touch-action:none}
+@media (pointer:coarse){#tc{display:flex}#help{display:none}}
+body.vr #top,body.vr #mm,body.vr #hud,body.vr #help,body.vr #tc{display:none!important}
+</style></head><body>
+<canvas id="c"></canvas>
+<div class="p" id="top">
+ <select id="sel"><option value="0">شهر نمونه ۱ — مرکزی</option><option value="1">شهر نمونه ۲ — ساحلی</option></select>
+ <label class="b">بارگذاری Region Pack<input id="file" type="file" accept=".json" hidden></label>
+ <button id="vr" class="b" style="background:#ff2bd6;color:#fff;border:0;border-radius:8px;padding:4px 10px;font:inherit;cursor:pointer;box-shadow:0 0 12px #ff2bd6">🥽 حالت Cardboard VR</button><button id="cb" class="b" style="background:#1e293b;color:#f1f5f9;border:1px solid #475569;border-radius:8px;padding:4px 8px;font:inherit;cursor:pointer">دوربین: اول‌شخص</button><span id="nm"></span>
+</div>
+<canvas class="p" id="mm" width="150" height="150"></canvas>
+<div class="p" id="hud"><b id="sp">0</b> km/h<br>شیب: <span id="gr">0</span>٪</div>
+<div class="p" id="help">↑/W pedal · ↓/S ترمز · ←→/A D فرمان · C دوربین<br>داده نمونه پروسیجرال است؛ ساختار آن مثل خروجی OSM است. © OpenStreetMap contributors در نسخه واقعی</div>
+<div id="tc"><button data-k="left">◀</button><button data-k="up">▲</button><button data-k="down">▼</button><button data-k="right">▶</button></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ---------- Region Pack generator (stand-in for the offline OSM/DEM preprocessing script) ----------
+const rng=s=>()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
+const M=(o)=>[111320*Math.cos(o.lat*Math.PI/180),110540];
+const m2ll=(o,x,z)=>[o.lon+x/M(o)[0],o.lat-z/M(o)[1]];
+const ll2m=(o,[lo,la])=>[(lo-o.lon)*M(o)[0],-(la-o.lat)*M(o)[1]];
+function gen(p){
+ const r=rng(p.seed),o=p.origin,N=p.n,B=p.block,W=p.road,S=B+W,half=N*S/2,P=(x,z)=>m2ll(o,x,z);
+ const roads=[],buildings=[],trees=[];
+ for(let i=0;i<=N;i++){const c=-half+i*S,k=i%3?'residential':'primary';
+  roads.push({highway:k,coords:[P(c,-half),P(c,half)]});roads.push({highway:k,coords:[P(-half,c),P(half,c)]});}
+ const q=half+W+12;roads.push({highway:'cycleway',coords:[P(-q,-q),P(q,-q),P(q,q),P(-q,q),P(-q,-q)]});
+ for(let i=0;i<N;i++)for(let j=0;j<N;j++){
+  const x0=-half+i*S+W/2,z0=-half+j*S+W/2;
+  if(r()<p.park){for(let t=0;t<16;t++)trees.push(P(x0+3+r()*(B-6),z0+3+r()*(B-6)));continue}
+  const L=(B-6)/2;
+  for(let a=0;a<2;a++)for(let b=0;b<2;b++){
+   const lx=x0+2+a*(L+2),lz=z0+2+b*(L+2),in1=r()*2,in2=r()*2;
+   const xa=lx+in1,xb=lx+L-in2,za=lz+in2,zb=lz+L-in1;
+   buildings.push({h:Math.round(p.hmin+Math.pow(r(),p.hp)*(p.hmax-p.hmin)),c:Math.floor(r()*4),
+    coords:[P(xa,za),P(xb,za),P(xb,zb),P(xa,zb),P(xa,za)]});
+  }}
+ return{manifest:{name:p.name,origin:o,extent:q+40,start:[0,0],style:p.style},roads,buildings,trees};
+}
+const PACKS=[
+ gen({name:'شهر نمونه ۱ — مرکزی',seed:7,origin:{lon:13.405,lat:52.52},n:8,block:56,road:11,park:.16,hmin:9,hmax:60,hp:2.2,
+  style:{sky:'#0a0420',fog:[50,420],ground:'#0b0820',hill:3,palette:['#16123a','#1d1042','#0f1c3a','#22123a'],neon:['#00f0ff','#ff2bd6','#7c4dff','#00ffa6']}}),
+ gen({name:'شهر نمونه ۲ — ساحلی',seed:21,origin:{lon:4.89,lat:52.37},n:7,block:48,road:9,park:.28,hmin:6,hmax:24,hp:1.3,
+  style:{sky:'#14041c',fog:[50,400],ground:'#160724',hill:6,palette:['#241036','#2a1230','#101a38','#2c1228'],neon:['#ff9500','#ff2bd6','#00ffd5','#ffe600']}})
+];
+
+// ---------- Renderer ----------
+const cv=document.getElementById('c'),ren=new THREE.WebGLRenderer({canvas:cv,antialias:true});
+ren.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene=new THREE.Scene(),cam=new THREE.PerspectiveCamera(65,1,.3,1500);
+scene.add(new THREE.HemisphereLight(0x6a5cff,0x1a0830,.9));
+const sun=new THREE.DirectionalLight(0x9a7bff,.5);sun.position.set(120,200,80);scene.add(sun);
+const stp=[];for(let i=0;i<700;i++){const u=Math.random()*6.283,v=Math.random()*1.3+.05,r=900;stp.push(Math.cos(u)*Math.cos(v)*r,Math.sin(v)*r,Math.sin(u)*Math.cos(v)*r)}
+const sg=new THREE.BufferGeometry();sg.setAttribute('position',new THREE.Float32BufferAttribute(stp,3));
+const stars=new THREE.Points(sg,new THREE.PointsMaterial({color:0xffffff,size:2,sizeAttenuation:false,fog:false}));scene.add(stars);
+scene.add(cam);
+const hc=document.createElement('canvas');hc.width=256;hc.height=64;const hx=hc.getContext('2d'),ht=new THREE.CanvasTexture(hc);
+const vhud=new THREE.Mesh(new THREE.PlaneGeometry(.5,.125),new THREE.MeshBasicMaterial({map:ht,transparent:true,depthTest:false,fog:false}));
+vhud.position.set(0,-.42,-1.2);vhud.renderOrder=999;vhud.visible=false;cam.add(vhud);
+function resize(){ren.setSize(innerWidth,innerHeight,false);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()}
+addEventListener('resize',resize);resize();
+
+// ---------- Bike ----------
+const bike=new THREE.Group();bike.rotation.order='YXZ';
+const lean=new THREE.Group();bike.add(lean);
+const mat=(c,e=0)=>new THREE.MeshStandardMaterial({color:c,roughness:.5,emissive:c,emissiveIntensity:e});
+const wheels=[];
+for(const z of[-.55,.55]){const w=new THREE.Mesh(new THREE.TorusGeometry(.34,.04,8,24).rotateY(Math.PI/2),mat(0x00f0ff,1));w.position.set(0,.34,z);lean.add(w);wheels.push(w)}
+const box=(w,h,d,c,x,y,z,rx=0)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat(c,.8));m.position.set(x,y,z);m.rotation.x=rx;lean.add(m);return m};
+box(.05,.05,1.1,0xff2bd6,0,.62,0);box(.05,.45,.05,0xff2bd6,0,.8,.45);box(.5,.04,.04,0x00f0ff,0,1,.5);
+const torso=box(.28,.55,.22,0x2563eb,0,1.15,.05,.35);
+const head=new THREE.Mesh(new THREE.SphereGeometry(.13,12,12),mat(0xf2c9a0));head.position.set(0,1.55,.22);lean.add(head);
+const hl=new THREE.SpotLight(0xbfe9ff,2.4,70,.55,.5,1);hl.position.set(0,1.2,.6);hl.target.position.set(0,0,14);bike.add(hl,hl.target);
+scene.add(bike);
+
+// ---------- World building from a Region Pack ----------
+let world,H=()=>0,boxes=[],mmBase,ext=500;
+const mm=document.getElementById('mm'),mx=mm.getContext('2d');
+function load(pack){
+ if(world){world.traverse(o=>{o.geometry&&o.geometry.dispose()});scene.remove(world)}
+ world=new THREE.Group();scene.add(world);boxes=[];
+ const mf=pack.manifest,o=mf.origin,st=mf.style;ext=mf.extent;
+ document.getElementById('nm').textContent=mf.name;
+ scene.background=new THREE.Color(st.sky);scene.fog=new THREE.Fog(st.sky,st.fog[0],st.fog[1]);
+ const A=st.hill;H=(x,z)=>A*(Math.sin(x*.008+1)+Math.cos(z*.01)+Math.sin((x+z)*.005));
+ // terrain (stand-in for DEM tiles)
+ const g=new THREE.PlaneGeometry(1600,1600,160,160).rotateX(-Math.PI/2),pa=g.attributes.position;
+ for(let i=0;i<pa.count;i++)pa.setY(i,H(pa.getX(i),pa.getZ(i)));g.computeVertexNormals();
+ world.add(new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:st.ground,roughness:1})));
+ // roads: ribbons following the terrain
+ const W={primary:11,residential:8,cycleway:3.5,},C={primary:0x0c0c18,residential:0x11111e,cycleway:0x00ffa6};
+ for(const f of pack.roads){
+  const k=f.highway,w=W[k]||7,m=f.coords.map(c=>ll2m(o,c)),pts=[];
+  for(let i=0;i<m.length-1;i++){const[a,b]=[m[i],m[i+1]],n=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])/8));
+   for(let s=0;s<n;s++)pts.push([a[0]+(b[0]-a[0])*s/n,a[1]+(b[1]-a[1])*s/n])}
+  pts.push(m[m.length-1]);
+  const pos=[],idx=[];
+  pts.forEach((p,i)=>{const a=pts[Math.max(0,i-1)],b=pts[Math.min(pts.length-1,i+1)];
+   let tx=b[0]-a[0],tz=b[1]-a[1];const l=Math.hypot(tx,tz)||1;tx/=l;tz/=l;
+   const y=H(p[0],p[1])+(k=='cycleway'?.22:.15);
+   pos.push(p[0]-tz*w/2,y,p[1]+tx*w/2,p[0]+tz*w/2,y,p[1]-tx*w/2);
+   if(i<pts.length-1){const j=i*2;idx.push(j,j+1,j+2,j+1,j+3,j+2)}});
+  const rg=new THREE.BufferGeometry();rg.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));rg.setIndex(idx);rg.computeVertexNormals();
+  world.add(new THREE.Mesh(rg,k=='cycleway'?new THREE.MeshBasicMaterial({color:C[k],side:THREE.DoubleSide}):new THREE.MeshStandardMaterial({color:C[k]||0x11111e,side:THREE.DoubleSide,roughness:.35,metalness:.5})));
+  if(k!='cycleway'){const lc=k=='primary'?0xff2bd6:0x00c8ff;
+   for(const s of[0,1]){const lp=[];for(let i=0;i<pts.length;i++)lp.push(pos[i*6+s*3],pos[i*6+s*3+1]+.04,pos[i*6+s*3+2]);
+    const lg=new THREE.BufferGeometry();lg.setAttribute('position',new THREE.Float32BufferAttribute(lp,3));world.add(new THREE.Line(lg,new THREE.LineBasicMaterial({color:lc})))}
+   const cp=[];pts.forEach(p=>cp.push(p[0],H(p[0],p[1])+.18,p[1]));
+   const cg=new THREE.BufferGeometry();cg.setAttribute('position',new THREE.Float32BufferAttribute(cp,3));
+   const cl=new THREE.Line(cg,new THREE.LineDashedMaterial({color:0xffe600,dashSize:3,gapSize:4}));cl.computeLineDistances();world.add(cl)}
+ }
+ // buildings: ExtrudeGeometry from footprints
+ const NEON=st.neon||['#00f0ff','#ff2bd6','#ffd400','#7c4dff'];
+ const tex=NEON.map(c=>{const k=document.createElement('canvas');k.width=k.height=128;const x=k.getContext('2d');x.fillStyle='#000';x.fillRect(0,0,128,128);
+  for(let i=0;i<4;i++)for(let j=0;j<4;j++)if(Math.random()<.5){x.globalAlpha=.5+Math.random()*.5;x.fillStyle=c;x.fillRect(i*32+6,j*32+8,20,14)}
+  const t=new THREE.CanvasTexture(k);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(1/12,1/12);return t});
+ const bm=st.palette.map((c,i)=>new THREE.MeshStandardMaterial({color:c,roughness:.45,metalness:.3,emissive:0xffffff,emissiveMap:tex[i%tex.length],emissiveIntensity:1.2}));
+ const lm=NEON.map(c=>new THREE.LineBasicMaterial({color:c}));
+ for(const f of pack.buildings){
+  const ring=f.coords.map(c=>ll2m(o,c));
+  let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9,by=1e9,cy=0;
+  for(const[x,z]of ring){x0=Math.min(x0,x);x1=Math.max(x1,x);z0=Math.min(z0,z);z1=Math.max(z1,z);by=Math.min(by,H(x,z))}
+  const base=by-1.5,hh=f.h+1.5+(H((x0+x1)/2,(z0+z1)/2)-by);
+  const geo=new THREE.ExtrudeGeometry(new THREE.Shape(ring.map(([x,z])=>new THREE.Vector2(x,-z))),{depth:hh,bevelEnabled:false}).rotateX(-Math.PI/2);
+  const m=new THREE.Mesh(geo,bm[f.c%bm.length]);m.position.y=base;world.add(m);
+  const e=new THREE.LineSegments(new THREE.EdgesGeometry(geo,40),lm[f.c%lm.length]);e.position.y=base;world.add(e);
+  boxes.push([x0,x1,z0,z1]);
+ }
+ // trees: instanced
+ const T=pack.trees,tr=new THREE.InstancedMesh(new THREE.CylinderGeometry(.2,.28,2.4,6),mat(0x2a1a4a),T.length||1),
+  cr=new THREE.InstancedMesh(new THREE.ConeGeometry(1.7,5,7),mat(0x00ffa6,.55),T.length||1),d=new THREE.Object3D();
+ T.forEach((c,i)=>{const[x,z]=ll2m(o,c),y=H(x,z),s=.8+((i*37)%10)/16;
+  d.position.set(x,y+1.2*s,z);d.scale.setScalar(s);d.updateMatrix();tr.setMatrixAt(i,d.matrix);
+  d.position.y=y+4.2*s;d.updateMatrix();cr.setMatrixAt(i,d.matrix)});
+ world.add(tr,cr);
+ // minimap base
+ mmBase=document.createElement('canvas');mmBase.width=mmBase.height=150;const b=mmBase.getContext('2d');
+ b.fillStyle='rgba(15,23,42,.9)';b.fillRect(0,0,150,150);
+ const T2=(x,z)=>[(x+ext)/(2*ext)*150,(z+ext)/(2*ext)*150];
+ b.fillStyle='#5b2bd6';for(const[a,c,d2,e]of boxes){const[p,q]=T2(a,d2),[r2,s2]=T2(c,e);b.fillRect(p,q,Math.max(1,r2-p),Math.max(1,s2-q))}
+ for(const f of pack.roads){b.strokeStyle=f.highway=='cycleway'?'#00ffa6':'#00f0ff';b.lineWidth=f.highway=='primary'?1.6:.8;b.beginPath();
+  f.coords.forEach((c,i)=>{const[x,z]=ll2m(o,c),[p,q]=T2(x,z);i?b.lineTo(p,q):b.moveTo(p,q)});b.stroke()}
+ st0=mf.start;S.x=st0[0];S.z=st0[1];S.a=0;S.v=0;
+}
+let st0;const S={x:0,z:0,a:0,v:0,steer:0};
+
+// ---------- Input ----------
+const K={};const map={ArrowUp:'up',w:'up',W:'up',ArrowDown:'down',s:'down',S:'down',ArrowLeft:'left',a:'left',A:'left',ArrowRight:'right',d:'right',D:'right',' ':'down'};
+addEventListener('keydown',e=>{if(map[e.key]){K[map[e.key]]=1;e.preventDefault()}});
+addEventListener('keyup',e=>{if(map[e.key])K[map[e.key]]=0});
+let FP=true;const cb=document.getElementById('cb');
+function setCam(){FP=!FP;torso.visible=head.visible=!FP;cb.textContent=FP?'دوربین: اول‌شخص':'دوربین: سوم‌شخص';cb.blur()}
+cb.onclick=setCam;addEventListener('keydown',e=>{if(e.key=='c'||e.key=='C')setCam()});
+torso.visible=head.visible=false;
+document.querySelectorAll('#tc button').forEach(b=>{const k=b.dataset.k;
+ b.addEventListener('pointerdown',e=>{K[k]=1;e.preventDefault()});['pointerup','pointerleave','pointercancel'].forEach(t=>b.addEventListener(t,()=>K[k]=0))});
+document.getElementById('sel').onchange=e=>load(PACKS[+e.target.value]);
+document.getElementById('file').onchange=e=>{const f=e.target.files[0];if(!f)return;
+ f.text().then(t=>{try{const p=JSON.parse(t);if(!p.manifest||!p.roads||!p.buildings)throw 0;p.trees=p.trees||[];load(p)}catch(_){alert('فایل Region Pack معتبر نیست')}})};
+
+// ---------- Loop ----------
+// ---------- Cardboard VR: stereo rendering + head tracking via DeviceOrientation ----------
+let src='',VR=false,cruise=false,hasSensor=false,calib=false,dragYaw=0,dragPitch=0,hf=0,listening=false;
+const sc=new THREE.StereoCamera();sc.aspect=.5;sc.eyeSep=.064;
+const sensorQ=new THREE.Quaternion(),headQ=new THREE.Quaternion(),yawInv=new THREE.Quaternion(),yq=new THREE.Quaternion(),q0=new THREE.Quaternion(),q1=new THREE.Quaternion(-Math.SQRT1_2,0,0,Math.SQRT1_2);
+const eu=new THREE.Euler(),e3=new THREE.Euler(),ZZ=new THREE.Vector3(0,0,1),YY=new THREE.Vector3(0,1,0),DG=Math.PI/180;
+function onOri(e){
+ if(e.alpha==null||(src&&src!==e.type))return;src=e.type;hasSensor=true;
+ const o=((screen.orientation&&screen.orientation.angle)||window.orientation||0)*DG;
+ eu.set(e.beta*DG,e.alpha*DG,-e.gamma*DG,'YXZ');sensorQ.setFromEuler(eu);sensorQ.multiply(q1);sensorQ.multiply(q0.setFromAxisAngle(ZZ,-o));
+ if(!calib){e3.setFromQuaternion(sensorQ,'YXZ');yawInv.setFromAxisAngle(YY,-e3.y);calib=true}
+ headQ.copy(yawInv).multiply(sensorQ);
+}
+const qE=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2);
+function tryGeneric(){try{if(!window.RelativeOrientationSensor)return;
+ const rs=new RelativeOrientationSensor({frequency:60,referenceFrame:'screen'});
+ rs.addEventListener('reading',()=>{if(src&&src!=='gs')return;src='gs';hasSensor=true;const q=rs.quaternion;sensorQ.set(q[0],q[1],q[2],q[3]).premultiply(qE);
+  if(!calib){e3.setFromQuaternion(sensorQ,'YXZ');yawInv.setFromAxisAngle(YY,-e3.y);calib=true}headQ.copy(yawInv).multiply(sensorQ)});
+ rs.addEventListener('error',()=>{});rs.start()}catch(_){}}
+async function enterVR(){
+ try{if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission){const r=await DeviceOrientationEvent.requestPermission();if(r!=='granted')throw 0}}catch(_){document.getElementById('nm').textContent='دسترسی به سنسور حرکت داده نشد'}
+ if(!listening){addEventListener('deviceorientation',onOri);addEventListener('deviceorientationabsolute',onOri);tryGeneric();listening=true}
+ try{await document.documentElement.requestFullscreen()}catch(_){}
+ try{await screen.orientation.lock('landscape')}catch(_){}
+ try{navigator.wakeLock&&navigator.wakeLock.request('screen')}catch(_){}
+ if(!FP)setCam();
+ VR=true;calib=false;cruise=false;dragYaw=dragPitch=0;S.v=0;
+ document.body.classList.add('vr');cam.fov=85;cam.updateProjectionMatrix();vhud.visible=true;resize();
+ setTimeout(()=>{if(!hasSensor)document.getElementById('nm').textContent='سنسور حرکت پیدا نشد — لینک را مستقیم در Chrome باز کنید یا فایل را روی HTTPS میزبانی کنید'},2500);
+}
+function exitVR(){
+ VR=false;document.body.classList.remove('vr');cam.fov=65;cam.updateProjectionMatrix();vhud.visible=false;
+ ren.setScissorTest(false);ren.setViewport(0,0,innerWidth,innerHeight);resize();
+ if(document.fullscreenElement)document.exitFullscreen().catch(()=>{});
+}
+document.getElementById('vr').onclick=enterVR;
+document.addEventListener('fullscreenchange',()=>{if(VR&&!document.fullscreenElement)exitVR()});
+addEventListener('keydown',e=>{if(e.key=='Escape'&&VR)exitVR()});
+let pd=null;
+addEventListener('pointerdown',e=>{if(!VR)return;pd={x:e.clientX,y:e.clientY,m:0}});
+addEventListener('pointermove',e=>{if(!pd)return;const dx=e.clientX-pd.x,dy=e.clientY-pd.y;
+ if(Math.abs(dx)+Math.abs(dy)>6)pd.m=1;
+ if(pd.m&&!hasSensor){dragYaw-=dx*.005;dragPitch=Math.max(-1.2,Math.min(1.2,dragPitch-dy*.005));pd.x=e.clientX;pd.y=e.clientY}});
+addEventListener('pointerup',()=>{if(pd&&!pd.m)cruise=!cruise;pd=null});
+const clock=new THREE.Clock();let fwd=new THREE.Vector3();
+function tick(){
+ const dt=Math.min(clock.getDelta(),.05),fx=Math.sin(S.a),fz=Math.cos(S.a);
+ const g=H(S.x+fx,S.z+fz)-H(S.x,S.z);
+ if(K.up||(VR&&cruise))S.v+=5*dt;if(K.down)S.v-=12*dt;
+ S.v-=(.15+.03*S.v*S.v)*dt;S.v-=g*9.8*dt;S.v=Math.max(0,S.v);
+ let ts=(K.left?1:0)-(K.right?1:0);
+ if(VR&&!hasSensor)headQ.setFromEuler(eu.set(dragPitch,dragYaw,0,'YXZ'));S.steer+=(ts-S.steer)*Math.min(1,8*dt);
+ S.a+=S.steer*dt*1.7/(1+S.v*.14)*Math.min(1,S.v/.8);
+ S.x=Math.max(-ext,Math.min(ext,S.x+fx*S.v*dt));S.z=Math.max(-ext,Math.min(ext,S.z+fz*S.v*dt));
+ for(const[a,b,c,d]of boxes){const nx=Math.max(a,Math.min(b,S.x)),nz=Math.max(c,Math.min(d,S.z)),dx=S.x-nx,dz=S.z-nz,l=Math.hypot(dx,dz);
+  if(l<.6&&l>0){S.x=nx+dx/l*.6;S.z=nz+dz/l*.6;S.v*=.6}}
+ const y=H(S.x,S.z);bike.position.set(S.x,y,S.z);bike.rotation.y=S.a;bike.rotation.x=-Math.atan(g);lean.rotation.z=-S.steer*.3;
+ wheels.forEach(w=>w.rotation.x+=S.v*dt/.34);
+ if(FP||VR){S.d=(S.d||0)+S.v*dt;const bob=VR?0:Math.sin(S.d*2.2)*.012*Math.min(1,S.v/3);
+  cam.position.set(S.x+fx*.05,y+1.55+bob,S.z+fz*.05);if(VR)cam.quaternion.copy(yq.setFromAxisAngle(YY,S.a+Math.PI)).multiply(headQ);else{cam.lookAt(S.x+fx*10,y+1.5+g*6,S.z+fz*10);cam.rotateZ(S.steer*.15)}}
+ else{const want=new THREE.Vector3(S.x-fx*7,y+3.2,S.z-fz*7);want.y=Math.max(want.y,H(want.x,want.z)+1.5);
+  cam.position.lerp(want,1-Math.exp(-5*dt));cam.lookAt(S.x+fx*3,y+1.2,S.z+fz*3)}
+ document.getElementById('sp').textContent=Math.round(S.v*3.6);document.getElementById('gr').textContent=(g*100).toFixed(0);
+ if(mmBase){mx.drawImage(mmBase,0,0);const p=(S.x+ext)/(2*ext)*150,q=(S.z+ext)/(2*ext)*150;
+  mx.fillStyle='#f43f5e';mx.beginPath();mx.arc(p,q,3.5,0,7);mx.fill();
+  mx.strokeStyle='#f43f5e';mx.lineWidth=2;mx.beginPath();mx.moveTo(p,q);mx.lineTo(p+fx*9,q+fz*9);mx.stroke()}
+ stars.position.copy(cam.position);
+ if(VR&&innerWidth>innerHeight){cam.updateMatrixWorld(true);sc.update(cam);const w=innerWidth,h=innerHeight;
+  ren.setScissorTest(true);ren.clear();
+  ren.setScissor(0,0,w/2,h);ren.setViewport(0,0,w/2,h);ren.render(scene,sc.cameraL);
+  ren.setScissor(w/2,0,w/2,h);ren.setViewport(w/2,0,w/2,h);ren.render(scene,sc.cameraR);ren.setScissorTest(false);
+  if(hf++%6==0){hx.clearRect(0,0,256,64);hx.fillStyle='rgba(10,4,32,.6)';hx.fillRect(0,0,256,64);hx.fillStyle='#00f0ff';hx.font='bold 34px sans-serif';hx.textAlign='center';hx.fillText(hasSensor?Math.round(S.v*3.6)+' km/h '+(cruise?'▶':'⏸'):'NO SENSOR - drag',128,44);ht.needsUpdate=true}}
+ else{ren.setScissorTest(false);ren.setViewport(0,0,innerWidth,innerHeight);ren.render(scene,cam)}
+ requestAnimationFrame(tick);
+}
+load(PACKS[0]);cam.position.set(0,4,-8);tick();
+</script></body></html>
