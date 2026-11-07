@@ -176,18 +176,19 @@ document.getElementById('file').onchange=e=>{const f=e.target.files[0];if(!f)ret
 
 // ---------- Loop ----------
 // ---------- Cardboard VR: stereo rendering + head tracking via DeviceOrientation ----------
-let src='',VR=false,cruise=false,hasSensor=false,calib=false,dragYaw=0,dragPitch=0,hf=0,listening=false;
+let nullEv=false,src='',VR=false,cruise=false,hasSensor=false,calib=false,dragYaw=0,dragPitch=0,hf=0,listening=false;
 const sc=new THREE.StereoCamera();sc.aspect=.5;sc.eyeSep=.064;
 const sensorQ=new THREE.Quaternion(),headQ=new THREE.Quaternion(),yawInv=new THREE.Quaternion(),yq=new THREE.Quaternion(),q0=new THREE.Quaternion(),q1=new THREE.Quaternion(-Math.SQRT1_2,0,0,Math.SQRT1_2);
 const eu=new THREE.Euler(),e3=new THREE.Euler(),ZZ=new THREE.Vector3(0,0,1),YY=new THREE.Vector3(0,1,0),DG=Math.PI/180;
 function onOri(e){
- if(e.alpha==null||(src&&src!==e.type))return;src=e.type;hasSensor=true;
+ if(e.alpha==null){nullEv=true;return}if(src&&src!==e.type)return;src=e.type;hasSensor=true;
  const o=((screen.orientation&&screen.orientation.angle)||window.orientation||0)*DG;
  eu.set(e.beta*DG,e.alpha*DG,-e.gamma*DG,'YXZ');sensorQ.setFromEuler(eu);sensorQ.multiply(q1);sensorQ.multiply(q0.setFromAxisAngle(ZZ,-o));
  if(!calib){e3.setFromQuaternion(sensorQ,'YXZ');yawInv.setFromAxisAngle(YY,-e3.y);calib=true}
  headQ.copy(yawInv).multiply(sensorQ);
 }
 const qE=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2);
+function why(){return window!==window.top?'IFRAME':!isSecureContext?'NOT-HTTPS':typeof DeviceOrientationEvent==='undefined'?'NO-API':nullEv?'NULL-DATA':'NO-EVENTS'}
 function tryGeneric(){try{if(!window.RelativeOrientationSensor)return;
  const rs=new RelativeOrientationSensor({frequency:60,referenceFrame:'screen'});
  rs.addEventListener('reading',()=>{if(src&&src!=='gs')return;src='gs';hasSensor=true;const q=rs.quaternion;sensorQ.set(q[0],q[1],q[2],q[3]).premultiply(qE);
@@ -202,7 +203,7 @@ async function enterVR(){
  if(!FP)setCam();
  VR=true;calib=false;cruise=false;dragYaw=dragPitch=0;S.v=0;
  document.body.classList.add('vr');cam.fov=85;cam.updateProjectionMatrix();vhud.visible=true;resize();
- setTimeout(()=>{if(!hasSensor)document.getElementById('nm').textContent='سنسور حرکت پیدا نشد — لینک را مستقیم در Chrome باز کنید یا فایل را روی HTTPS میزبانی کنید'},2500);
+ setTimeout(()=>{if(!hasSensor)document.getElementById('nm').textContent='سنسور حرکت پیدا نشد ['+why()+'] — لینک را مستقیم در Chrome باز کنید یا فایل را روی HTTPS میزبانی کنید'},2500);
 }
 function exitVR(){
  VR=false;document.body.classList.remove('vr');cam.fov=65;cam.updateProjectionMatrix();vhud.visible=false;
@@ -245,7 +246,7 @@ function tick(){
   ren.setScissorTest(true);ren.clear();
   ren.setScissor(0,0,w/2,h);ren.setViewport(0,0,w/2,h);ren.render(scene,sc.cameraL);
   ren.setScissor(w/2,0,w/2,h);ren.setViewport(w/2,0,w/2,h);ren.render(scene,sc.cameraR);ren.setScissorTest(false);
-  if(hf++%6==0){hx.clearRect(0,0,256,64);hx.fillStyle='rgba(10,4,32,.6)';hx.fillRect(0,0,256,64);hx.fillStyle='#00f0ff';hx.font='bold 34px sans-serif';hx.textAlign='center';hx.fillText(hasSensor?Math.round(S.v*3.6)+' km/h '+(cruise?'▶':'⏸'):'NO SENSOR - drag',128,44);ht.needsUpdate=true}}
+  if(hf++%6==0){hx.clearRect(0,0,256,64);hx.fillStyle='rgba(10,4,32,.6)';hx.fillRect(0,0,256,64);hx.fillStyle='#00f0ff';hx.font='bold 34px sans-serif';hx.textAlign='center';(hasSensor?hx.fillText(Math.round(S.v*3.6)+' km/h '+(cruise?'▶':'⏸'),128,44):(hx.font='bold 20px sans-serif',hx.fillText('NO SENSOR: '+why(),128,26),hx.fillText('drag to look',128,52)));ht.needsUpdate=true}}
  else{ren.setScissorTest(false);ren.setViewport(0,0,innerWidth,innerHeight);ren.render(scene,cam)}
  requestAnimationFrame(tick);
 }
