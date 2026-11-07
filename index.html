@@ -16,7 +16,8 @@ select,label.b{background:#1e293b;color:#f1f5f9;border:1px solid #475569;border-
 #tc{position:fixed;bottom:calc(90px + env(safe-area-inset-bottom,0px));left:8px;display:none;gap:6px}
 #tc button{width:54px;height:54px;border-radius:50%;border:0;background:rgba(30,41,59,.8);color:#fff;font-size:22px;touch-action:none}
 @media (pointer:coarse){#tc{display:flex}#help{display:none}}
-body.vr #top,body.vr #mm,body.vr #hud,body.vr #help,body.vr #tc{display:none!important}
+body.vr #top,body.vr #mm,body.vr #hud,body.vr #help,body.vr #tc,body.vr #set{display:none!important}
+#set{top:calc(170px + env(safe-area-inset-top,0px));left:8px;font-size:12px;width:138px;line-height:1.6}#set input{width:100%;margin:0 0 4px}
 </style></head><body>
 <canvas id="c"></canvas>
 <div class="p" id="top">
@@ -27,6 +28,7 @@ body.vr #top,body.vr #mm,body.vr #hud,body.vr #help,body.vr #tc{display:none!imp
 <canvas class="p" id="mm" width="150" height="150"></canvas>
 <div class="p" id="hud"><b id="sp">0</b> km/h<br>شیب: <span id="gr">0</span>٪</div>
 <div class="p" id="help">↑/W pedal · ↓/S ترمز · ←→/A D فرمان · C دوربین<br>داده نمونه پروسیجرال است؛ ساختار آن مثل خروجی OSM است. © OpenStreetMap contributors در نسخه واقعی</div>
+<div class="p" id="set"><b>تنظیم Cardboard</b><br>فاصله چشم‌ها <span id="v1"></span><input id="ipd" type="range" min="0" max="70" step="1"><br>زاویه دید <span id="v2"></span><input id="fov" type="range" min="60" max="100" step="1"><br>جابه‌جایی تصویر <span id="v3"></span><input id="off" type="range" min="-10" max="12" step="1"></div>
 <div id="tc"><button data-k="left">◀</button><button data-k="up">▲</button><button data-k="down">▼</button><button data-k="right">▶</button></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
@@ -187,6 +189,16 @@ function onOri(e){
  if(!calib){e3.setFromQuaternion(sensorQ,'YXZ');yawInv.setFromAxisAngle(YY,-e3.y);calib=true}
  headQ.copy(yawInv).multiply(sensorQ);
 }
+// stereo comfort settings (saved on the device)
+const ST={ipd:55,fov:80,off:4};
+try{Object.assign(ST,JSON.parse(localStorage.getItem('cbST')||'{}'))}catch(_){}
+function sync(){for(const k of['ipd','fov','off']){ST[k]=Math.max(+document.getElementById(k).min,Math.min(+document.getElementById(k).max,ST[k]));document.getElementById(k).value=ST[k]}
+ document.getElementById('v1').textContent=ST.ipd+' mm';document.getElementById('v2').textContent=ST.fov+'°';document.getElementById('v3').textContent=ST.off+'%';
+ sc.eyeSep=ST.ipd/1000;if(VR){cam.fov=ST.fov;cam.updateProjectionMatrix()}
+ try{localStorage.setItem('cbST',JSON.stringify(ST))}catch(_){}}
+for(const k of['ipd','fov','off'])document.getElementById(k).oninput=e=>{ST[k]=+e.target.value;sync()};
+addEventListener('keydown',e=>{const m={'1':['ipd',-2],'2':['ipd',2],'3':['fov',-2],'4':['fov',2],'5':['off',-1],'6':['off',1]}[e.key];if(m){ST[m[0]]+=m[1];sync()}});
+sync();
 const qE=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2);
 function why(){return window!==window.top?'IFRAME':!isSecureContext?'NOT-HTTPS':typeof DeviceOrientationEvent==='undefined'?'NO-API':nullEv?'NULL-DATA':'NO-EVENTS'}
 function tryGeneric(){try{if(!window.RelativeOrientationSensor)return;
@@ -202,7 +214,7 @@ async function enterVR(){
  try{navigator.wakeLock&&navigator.wakeLock.request('screen')}catch(_){}
  if(!FP)setCam();
  VR=true;calib=false;cruise=false;dragYaw=dragPitch=0;S.v=0;
- document.body.classList.add('vr');cam.fov=85;cam.updateProjectionMatrix();vhud.visible=true;resize();
+ document.body.classList.add('vr');cam.fov=ST.fov;cam.updateProjectionMatrix();vhud.visible=true;resize();
  setTimeout(()=>{if(!hasSensor)document.getElementById('nm').textContent='سنسور حرکت پیدا نشد ['+why()+'] — لینک را مستقیم در Chrome باز کنید یا فایل را روی HTTPS میزبانی کنید'},2500);
 }
 function exitVR(){
@@ -242,10 +254,11 @@ function tick(){
   mx.fillStyle='#f43f5e';mx.beginPath();mx.arc(p,q,3.5,0,7);mx.fill();
   mx.strokeStyle='#f43f5e';mx.lineWidth=2;mx.beginPath();mx.moveTo(p,q);mx.lineTo(p+fx*9,q+fz*9);mx.stroke()}
  stars.position.copy(cam.position);
- if(VR&&innerWidth>innerHeight){cam.updateMatrixWorld(true);sc.update(cam);const w=innerWidth,h=innerHeight;
+ if(VR&&innerWidth>innerHeight){cam.focus=1000;cam.updateMatrixWorld(true);sc.update(cam);const w=innerWidth,h=innerHeight;
   ren.setScissorTest(true);ren.clear();
-  ren.setScissor(0,0,w/2,h);ren.setViewport(0,0,w/2,h);ren.render(scene,sc.cameraL);
-  ren.setScissor(w/2,0,w/2,h);ren.setViewport(w/2,0,w/2,h);ren.render(scene,sc.cameraR);ren.setScissorTest(false);
+  const so=ST.off/100*w;
+  ren.setScissor(0,0,w/2,h);ren.setViewport(so,0,w/2,h);ren.render(scene,sc.cameraL);
+  ren.setScissor(w/2,0,w/2,h);ren.setViewport(w/2-so,0,w/2,h);ren.render(scene,sc.cameraR);ren.setScissorTest(false);
   if(hf++%6==0){hx.clearRect(0,0,256,64);hx.fillStyle='rgba(10,4,32,.6)';hx.fillRect(0,0,256,64);hx.fillStyle='#00f0ff';hx.font='bold 34px sans-serif';hx.textAlign='center';(hasSensor?hx.fillText(Math.round(S.v*3.6)+' km/h '+(cruise?'▶':'⏸'),128,44):(hx.font='bold 20px sans-serif',hx.fillText('NO SENSOR: '+why(),128,26),hx.fillText('drag to look',128,52)));ht.needsUpdate=true}}
  else{ren.setScissorTest(false);ren.setViewport(0,0,innerWidth,innerHeight);ren.render(scene,cam)}
  requestAnimationFrame(tick);
