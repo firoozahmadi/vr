@@ -23,12 +23,12 @@ body.vr #top,body.vr #mm,body.vr #hud,body.vr #help,body.vr #tc,body.vr #set{dis
 <div class="p" id="top">
  <select id="sel"><option value="0">شهر نمونه ۱ — مرکزی</option><option value="1">شهر نمونه ۲ — ساحلی</option></select>
  <label class="b">بارگذاری Region Pack<input id="file" type="file" accept=".json" hidden></label>
- <button id="vr" class="b" style="background:#ff2bd6;color:#fff;border:0;border-radius:8px;padding:4px 10px;font:inherit;cursor:pointer;box-shadow:0 0 12px #ff2bd6">🥽 حالت Cardboard VR</button><button id="cb" class="b" style="background:#1e293b;color:#f1f5f9;border:1px solid #475569;border-radius:8px;padding:4px 8px;font:inherit;cursor:pointer">دوربین: اول‌شخص</button><span id="nm"></span>
+ <button id="mic" class="b" style="background:#00c8a0;color:#04120f;border:0;border-radius:8px;padding:4px 10px;font:inherit;cursor:pointer">🎤 کنترل با صدا</button><button id="vr" class="b" style="background:#ff2bd6;color:#fff;border:0;border-radius:8px;padding:4px 10px;font:inherit;cursor:pointer;box-shadow:0 0 12px #ff2bd6">🥽 حالت Cardboard VR</button><button id="cb" class="b" style="background:#1e293b;color:#f1f5f9;border:1px solid #475569;border-radius:8px;padding:4px 8px;font:inherit;cursor:pointer">دوربین: اول‌شخص</button><span id="nm"></span>
 </div>
 <canvas class="p" id="mm" width="150" height="150"></canvas>
 <div class="p" id="hud"><b id="sp">0</b> km/h<br>شیب: <span id="gr">0</span>٪</div>
 <div class="p" id="help">↑/W pedal · ↓/S ترمز · ←→/A D فرمان · C دوربین<br>داده نمونه پروسیجرال است؛ ساختار آن مثل خروجی OSM است. © OpenStreetMap contributors در نسخه واقعی</div>
-<div class="p" id="set"><b>تنظیم Cardboard</b><br>فاصله چشم‌ها <span id="v1"></span><input id="ipd" type="range" min="0" max="70" step="1"><br>زاویه دید <span id="v2"></span><input id="fov" type="range" min="60" max="100" step="1"><br>جابه‌جایی تصویر <span id="v3"></span><input id="off" type="range" min="-10" max="12" step="1"></div>
+<div class="p" id="set"><b>تنظیم Cardboard</b><br>فاصله چشم‌ها <span id="v1"></span><input id="ipd" type="range" min="0" max="70" step="1"><br>زاویه دید <span id="v2"></span><input id="fov" type="range" min="60" max="100" step="1"><br>جابه‌جایی تصویر <span id="v3"></span><input id="off" type="range" min="-10" max="12" step="1"><br>حساسیت صدا<input id="sens" type="range" min="1" max="10" step="1"></div>
 <div id="tc"><button data-k="left">◀</button><button data-k="up">▲</button><button data-k="down">▼</button><button data-k="right">▶</button></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
@@ -231,11 +231,35 @@ addEventListener('pointermove',e=>{if(!pd)return;const dx=e.clientX-pd.x,dy=e.cl
  if(Math.abs(dx)+Math.abs(dy)>6)pd.m=1;
  if(pd.m&&!hasSensor){dragYaw-=dx*.005;dragPitch=Math.max(-1.2,Math.min(1.2,dragPitch-dy*.005));pd.x=e.clientX;pd.y=e.clientY}});
 addEventListener('pointerup',()=>{if(pd&&!pd.m)cruise=!cruise;pd=null});
+// ---------- Voice control: sound level from the microphone pedals the bike ----------
+const MIC={on:false,act:false,lvl:0,th:.05,base:.01,f:1,hold:0,an:null,buf:null,cal:null,stream:null};
+const sn=document.getElementById('sens');sn.value=ST.sens||5;sn.oninput=e=>{ST.sens=+e.target.value;sync()};
+async function micToggle(){
+ const b=document.getElementById('mic');
+ if(MIC.on){MIC.on=false;MIC.act=false;if(MIC.stream)MIC.stream.getTracks().forEach(t=>t.stop());b.textContent='🎤 کنترل با صدا';return}
+ try{
+  const ac=new (window.AudioContext||window.webkitAudioContext)();
+  const st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+  await ac.resume();MIC.an=ac.createAnalyser();MIC.an.fftSize=1024;ac.createMediaStreamSource(st).connect(MIC.an);
+  MIC.buf=new Float32Array(1024);MIC.stream=st;MIC.cal=[];MIC.on=true;b.textContent='🎤 کالیبره... ساکت باشید';
+  setTimeout(()=>{const a=MIC.cal;MIC.base=a.length?a.reduce((x,y)=>x+y)/a.length:.01;MIC.cal=null;b.textContent='🎤 فعال — بگو دووو'},1200);
+ }catch(_){document.getElementById('nm').textContent='دسترسی میکروفون ممکن نشد ['+(window!==window.top?'IFRAME':!isSecureContext?'NOT-HTTPS':'DENIED')+']'}
+}
+function micTick(){
+ if(!MIC.on)return;MIC.an.getFloatTimeDomainData(MIC.buf);
+ let s=0;for(let i=0;i<MIC.buf.length;i++)s+=MIC.buf[i]*MIC.buf[i];const r=Math.sqrt(s/MIC.buf.length);
+ MIC.lvl+=(r-MIC.lvl)*.5;
+ if(MIC.cal){MIC.cal.push(r);return}
+ MIC.th=Math.max(.012,MIC.base*2.5+.01)*5/(ST.sens||5);
+ const now=performance.now();
+ if(MIC.lvl>MIC.th){MIC.act=true;MIC.hold=now+250;MIC.f=Math.max(.5,Math.min(1.4,MIC.lvl/(MIC.th*2)))}else if(now>MIC.hold)MIC.act=false;
+}
+document.getElementById('mic').onclick=micToggle;
 const clock=new THREE.Clock();let fwd=new THREE.Vector3();
 function tick(){
  const dt=Math.min(clock.getDelta(),.05),fx=Math.sin(S.a),fz=Math.cos(S.a);
  const g=H(S.x+fx,S.z+fz)-H(S.x,S.z);
- if(K.up||(VR&&cruise))S.v+=5*dt;if(K.down)S.v-=12*dt;
+ micTick();if(K.up||(VR&&cruise))S.v+=5*dt;else if(MIC.on&&MIC.act)S.v+=5*dt*MIC.f;if(K.down)S.v-=12*dt;
  S.v-=(.15+.03*S.v*S.v)*dt;S.v-=g*9.8*dt;S.v=Math.max(0,S.v);
  let ts=(K.left?1:0)-(K.right?1:0);
  if(VR&&!hasSensor)headQ.setFromEuler(eu.set(dragPitch,dragYaw,0,'YXZ'));S.steer+=(ts-S.steer)*Math.min(1,8*dt);
@@ -259,7 +283,7 @@ function tick(){
   const so=ST.off/100*w;
   ren.setScissor(0,0,w/2,h);ren.setViewport(so,0,w/2,h);ren.render(scene,sc.cameraL);
   ren.setScissor(w/2,0,w/2,h);ren.setViewport(w/2-so,0,w/2,h);ren.render(scene,sc.cameraR);ren.setScissorTest(false);
-  if(hf++%6==0){hx.clearRect(0,0,256,64);hx.fillStyle='rgba(10,4,32,.6)';hx.fillRect(0,0,256,64);hx.fillStyle='#00f0ff';hx.font='bold 34px sans-serif';hx.textAlign='center';(hasSensor?hx.fillText(Math.round(S.v*3.6)+' km/h '+(cruise?'▶':'⏸'),128,44):(hx.font='bold 20px sans-serif',hx.fillText('NO SENSOR: '+why(),128,26),hx.fillText('drag to look',128,52)));ht.needsUpdate=true}}
+  if(hf++%6==0){hx.clearRect(0,0,256,64);hx.fillStyle='rgba(10,4,32,.6)';hx.fillRect(0,0,256,64);hx.fillStyle='#00f0ff';hx.font='bold 34px sans-serif';hx.textAlign='center';(hasSensor?hx.fillText(Math.round(S.v*3.6)+' km/h '+(cruise?'▶':'⏸'),128,44):(hx.font='bold 20px sans-serif',hx.fillText('NO SENSOR: '+why(),128,26),hx.fillText('drag to look',128,52)));if(MIC.on){hx.fillStyle='#333';hx.fillRect(28,56,200,6);hx.fillStyle=MIC.act?'#00ff9c':'#ff2bd6';hx.fillRect(28,56,Math.min(200,200*MIC.lvl/(MIC.th*3)),6)}ht.needsUpdate=true}}
  else{ren.setScissorTest(false);ren.setViewport(0,0,innerWidth,innerHeight);ren.render(scene,cam)}
  requestAnimationFrame(tick);
 }
